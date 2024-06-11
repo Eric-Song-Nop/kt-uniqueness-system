@@ -3,6 +3,7 @@
 #import "rules/unification.typ": *
 #import "rules/statements.typ": *
 #import "../vars.typ": *
+#import "../proof-tree.typ": *
 #show raw.where(block: true): frame-box
 #show link: set text(fill: rgb(0, 0, 255))
 #show link: underline
@@ -191,6 +192,154 @@ The same can be done for the guard of if statements:
 - `if (p1 == m(...)) ...` $equiv$ `var p2 ; p2 = m(...) ; if(p1 == p2) ...`
 
 // #include "while-loops.typ"
+
+#pagebreak()
+= Rules on CFG for Kotlin
+Basic rules for Uniqueness and Borrowing won't change here,
+but adapted to fit the CFG representation of Kotlin.
+
+The key gap between the CFG version and the type rules is at the function call.
+Type checking at function calls need adjustment so that it can be done in control flow order.
+
+Consider if we naively apply the basic transforma and join rule on the following example:
+```kt
+// The following code should not be valid
+fun f(x: ♭ unique, y: shared)
+fun use_f(x: unique) {
+  // { x: unique }
+  f (
+    x, // eval x { x: unique }
+    x  // eval x { x: shared }
+  ) // wrong result eval f {x: shared} = {x: shared, $result: shared}
+}
+```
+
+More examples are at the example subsection below.
+
+thus, we introduce a new context which stores the the upper bound of the path
+such a context $Gamma$ is created at the in node for a function call:
+
+```kt
+// The following code should not be valid
+fun f(x: ♭ unique, y: shared)
+fun use_f(x: unique) {
+  // { x: unique }
+  f ( // []
+    x, // eval x { x: unique } [x: bottom]
+    x  // eval x { x: shared }
+  ) // wrong result eval f {x: shared} = {x: shared, $result: shared}
+}
+```
+
+bottom is introduced for this lattice to represent the least upper bound of the annotations:
+
+- Variables not in scope are considered to have the annotation `T`.
+- Join nodes does least upper bound $lub$ of the annotations of the incoming edges.
+    - In a different point of view, we can separate uniqueness and borrowing,
+        - $"Unique" <= "Shared" <= top$
+        - $"Not Borrow" <= "Borrow" <= top$
+
+== Check
+
+Here define the check rules for function calls.
+
+#prooftree(
+    axiom($Delta,Gamma tr alpha_0 beta_0 p_0 tl Delta^1, Gamma^1$),
+    axiom($...$),
+    axiom($Delta^(n-1),Gamma^(n-1) tr alpha_n beta_n p_n tl Delta^n, Gamma^n$),
+
+    rule(n:3,label: "check", $Delta, Gamma tr f(alpha_0 beta_0 p_0, ... , alpha_n beta_n p_n) tl Delta^n, Gamma^n$)
+)
+
+== Examples
+#figure( ```kt
+// Should not pass
+fun f(x: ♭ shared, y: unique)
+fun use_f(x: unique) {
+  f (
+    x,
+    x 
+  )
+}
+
+fun use_f(x: unique) {
+    b share $1 = x // $1: unique, x: unique
+    val $2 = $1 // $2: unique, $1: T
+    f ($1, $2) // Fail
+}
+``` )
+
+#figure( ```kt
+// Should not pass
+fun f(x: unique, y: ♭ shared)
+fun use_f(x: unique) {
+  f (
+    x,
+    x
+  )
+}
+``` )
+
+#figure( ```kt
+// Should pass
+fun f(x: shared, y: ♭ shared)
+fun use_f(x: unique) {
+  f (
+    x,
+    x
+  )
+}
+``` )
+
+#figure( ```kt
+// Should not pass
+fun f(x: unique, y: shared)
+fun use_f(x: unique) {
+  f (
+    x,
+    x
+  )
+}
+``` )
+
+#figure( ```kt
+// Should not pass
+fun f(x: ♭ unique, y: ♭ shared)
+fun use_f(x: unique) {
+  f (
+    x,
+    x
+  )
+}
+``` )
+
+#figure( ```kt
+// Should pass
+fun g(x: ♭ unique): shared
+fun f_use_g(x: ♭ shared, y: unique)
+fun use_f(x: unique) {
+  f_use_g(
+    g(
+      x
+    ),
+    x
+  )
+}
+``` )
+
+#figure( ```kt
+// Should pass
+fun g(x: ♭ unique): shared
+fun f_use_g(x: shared, y: shared)
+fun use_f(x: unique) {
+  f_use_g(
+    x,
+    g(
+      x
+    )
+  )
+}
+``` )
 
 #pagebreak()
 = Examples

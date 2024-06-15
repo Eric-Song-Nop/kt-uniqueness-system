@@ -200,148 +200,104 @@ but adapted to fit the CFG representation of Kotlin.
 
 The key gap between the CFG version and the type rules is at the function call.
 Type checking at function calls need adjustment so that it can be done in control flow order.
+The support for recursive function all is alse missing is previous typing rules.
 
-Consider if we naively apply the basic transforma and join rule on the following example:
+== Examples for recursive function call
+- Example with multiple call with unique
 ```kt
-// The following code should not be valid
-fun f(x: ♭ unique, y: shared)
+// Should report error
+fun f(x: unique, y: unique)
 fun use_f(x: unique) {
-  // { x: unique }
-  f (
-    x, // eval x { x: unique }
-    x  // eval x { x: shared }
-  ) // wrong result eval f {x: shared} = {x: shared, $result: shared}
+  f (x, x)
+}
+```
+- Example with multiple call with shared
+```kt
+// Should report error
+fun f(x: shared, y: unique)
+fun use_f(x: unique) {
+  f (x, x)
+}
+```
+- Example with unique and borrowed
+```kt
+// Should report error
+fun f(x: unique, y: b) // b for either shared or unique borrow
+fun use_f(x: unique) {
+  f (x, x)
+}
+```
+- Example with unique and nested borrowed
+```kt
+// Should pass
+fun f(x: unique, y) // no notation for any uniqueness or borrowing
+fun g(x: b)
+fun use_f(x: unique) {
+  f (x, g(x))
+}
+```
+- Example with unique and nested share
+```kt
+// Should report error
+fun f(x: unique, y)
+fun g(x: shared)
+fun use_f(x: unique) {
+  f (x, g(x))
+}
+```
+- Example with Shared and nested unique or borrowed unique
+```kt
+// Should report error for first, but not second
+fun f(x: shared, y)
+fun g1(x: unique)
+fun g2(x: b unique)
+fun use_f(x: unique) {
+  f (x, g1(x))
+  f (x, g2(x))
+}
+```
+- Example with b unique and anything
+```kt
+// Should report error
+fun f(x: b unique, y)
+fun use_f(x: unique) {
+  f (x, x)
 }
 ```
 
-More examples are at the example subsection below.
+== CFG for function call
 
-thus, we introduce a new context which stores the the upper bound of the path
-such a context $Gamma$ is created at the in node for a function call:
+CFG for function call is represented first eval the arguments sequentially and then call the function.
+Consider the following example:
 
 ```kt
-// The following code should not be valid
-fun f(x: ♭ unique, y: shared)
-fun use_f(x: unique) {
-  // { x: unique }
-  f ( // []
-    x, // eval x { x: unique } [x: bottom]
-    x  // eval x { x: shared }
-  ) // wrong result eval f {x: shared} = {x: shared, $result: shared}
+fun use_f (x: Unique) {
+    f(x, g(h(x)), l(x), x)
 }
 ```
 
-bottom is introduced for this lattice to represent the least upper bound of the annotations:
+The CFG looks like:
+$ &"$1" := x \
+  &-> "$2" := x -> "$3" := h("$2") -> "$4" := g("$3") \
+  &-> "$5" := x -> "$6" := l("$5") \
+  &-> "$7" := x \
+  &-> "$result" := f("$1", "$4", "$6", "7") $
 
-- Variables not in scope are considered to have the annotation `T`.
-- Join nodes does least upper bound $lub$ of the annotations of the incoming edges.
-    - In a different point of view, we can separate uniqueness and borrowing,
-        - $"Unique" <= "Shared" <= top$
-        - $"Not Borrow" <= "Borrow" <= top$
+Checking, unification(in terms of typing rule) and uniqueness update does not happen at assign stage, but on the function evaluation.
 
-== Check
-
-Here define the check rules for function calls.
-
-#prooftree(
-    axiom($Delta,Gamma tr alpha_0 beta_0 p_0 tl Delta^1, Gamma^1$),
-    axiom($...$),
-    axiom($Delta^(n-1),Gamma^(n-1) tr alpha_n beta_n p_n tl Delta^n, Gamma^n$),
-
-    rule(n:3,label: "check", $Delta, Gamma tr f(alpha_0 beta_0 p_0, ... , alpha_n beta_n p_n) tl Delta^n, Gamma^n$)
-)
-
-== Examples
-#figure( ```kt
-// Should not pass
-fun f(x: ♭ shared, y: unique)
-fun use_f(x: unique) {
-  f (
-    x,
-    x 
-  )
+This tells that the sequence of nested functions affect the final result:
+```kt
+fun g1(x: b Unique)
+fun g2(x: Unique)
+fun f()
+fun use_f(x: Unique) {
+    f (g1(x), g2(x)) // Ok
+    f (g2(x), g1(x)) // Fail
 }
-
-fun use_f(x: unique) {
-    b share $1 = x // $1: unique, x: unique
-    val $2 = $1 // $2: unique, $1: T
-    f ($1, $2) // Fail
-}
-``` )
-
-#figure( ```kt
-// Should not pass
-fun f(x: unique, y: ♭ shared)
-fun use_f(x: unique) {
-  f (
-    x,
-    x
-  )
-}
-``` )
-
-#figure( ```kt
-// Should pass
-fun f(x: shared, y: ♭ shared)
-fun use_f(x: unique) {
-  f (
-    x,
-    x
-  )
-}
-``` )
-
-#figure( ```kt
-// Should not pass
-fun f(x: unique, y: shared)
-fun use_f(x: unique) {
-  f (
-    x,
-    x
-  )
-}
-``` )
-
-#figure( ```kt
-// Should not pass
-fun f(x: ♭ unique, y: ♭ shared)
-fun use_f(x: unique) {
-  f (
-    x,
-    x
-  )
-}
-``` )
-
-#figure( ```kt
-// Should pass
-fun g(x: ♭ unique): shared
-fun f_use_g(x: ♭ shared, y: unique)
-fun use_f(x: unique) {
-  f_use_g(
-    g(
-      x
-    ),
-    x
-  )
-}
-``` )
-
-#figure( ```kt
-// Should pass
-fun g(x: ♭ unique): shared
-fun f_use_g(x: shared, y: shared)
-fun use_f(x: unique) {
-  f_use_g(
-    x,
-    g(
-      x
-    )
-  )
-}
-``` )
+```
 
 #pagebreak()
+
 = Examples
 
 == Paths-permissions:
@@ -448,7 +404,7 @@ fun use_f3(x: @Unique B) {
 == Borrowed fields
 
 Fields of a borrowed variable are borrowed too. But differently from variables, they can be read/written and so these operation require special rules.
-- `Assign-Borrowed-Field` tells us what happens when reading a borrowed field. The most important thing to notice is that after being read, the field will be annotated with $top$, even if it is shared. Doing this is necessary to guarantee soundness while passing unique variables to functions expecting a borrowed shared argument.
+- `Assign-Borrowed-Field` tells us what happens when reading a borrowed field. The most important thing to notice is that after being read, the field will be annotated with $top$ , even if it is shared. Doing this is necessary to guarantee soundness while passing unique variables to functions expecting a borrowed shared argument.
 - For the same reason, borrowed fields can only be re-assigned to something that is unique. Otherwise passing a unique to a function expecting a borrowed shared argument cannot guarantee that uniqueness is preserved.
 
 ```kt
@@ -509,7 +465,9 @@ fun f(a1: @Unique @Borrowed A, a2 : @Shared @Borrowed A) {
 ```
 
 == Stack example
+
 This shows how the example presented in #link("https://arxiv.org/pdf/2309.05637.pdf")[LATTE] paper works with this system.
+
 ```kt
 class Node(var value: @Unique Any?, var next: @Unique Node?)
 

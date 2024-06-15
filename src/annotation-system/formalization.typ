@@ -289,7 +289,7 @@ This tells that the sequence of nested functions affect the final result:
 ```kt
 fun g1(x: b Unique)
 fun g2(x: Unique)
-fun f()
+fun f(x, y)
 fun use_f(x: Unique) {
     f (g1(x), g2(x)) // Ok
     f (g2(x), g1(x)) // Fail
